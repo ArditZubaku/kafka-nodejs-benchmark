@@ -1,0 +1,164 @@
+services:
+  kafka-controller:
+    image: apache/kafka:4.1.1
+    container_name: kafka-controller
+    hostname: kafka-controller
+    environment:
+      KAFKA_PROCESS_ROLES: controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-controller:9093
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_controller_data:/var/lib/kafka/data
+
+  kafka-broker1:
+    image: apache/kafka:4.1.1
+    container_name: kafka-broker-1
+    hostname: kafka-broker1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - kafka-controller
+    environment:
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_NODE_ID: 2
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-broker1:19092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-controller:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    volumes:
+      - kafka_broker1_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost 19092"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka-broker2:
+    image: apache/kafka:4.1.1
+    container_name: kafka-broker-2
+    hostname: kafka-broker2
+    ports:
+      - "9093:9092"
+    depends_on:
+      - kafka-controller
+    environment:
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_NODE_ID: 3
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-broker2:19092,EXTERNAL://localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-controller:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_broker2_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost 19092"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka-broker3:
+    image: apache/kafka:4.1.1
+    container_name: kafka-broker-3
+    hostname: kafka-broker3
+    ports:
+      - "9094:9092"
+    depends_on:
+      - kafka-controller
+    environment:
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_NODE_ID: 4
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-broker3:19092,EXTERNAL://localhost:9094
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-controller:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_broker3_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost 19092"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # -------------------------------------------------------
+  # Kafka init container (readiness + topic creation)
+  # -------------------------------------------------------
+  kafka-init:
+    image: apache/kafka:4.1.1
+    container_name: kafka-init
+    depends_on:
+      kafka-broker1:
+        condition: service_healthy
+      kafka-broker2:
+        condition: service_healthy
+      kafka-broker3:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        echo "Waiting for Kafka broker protocol..."
+        until timeout 5 /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-broker1:19092 >/dev/null 2>&1; do
+          echo "Kafka not ready yet..."
+          sleep 2
+        done
+
+        echo "Kafka protocol ready, creating topic..."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka-broker1:19092 \
+          --create \
+          --if-not-exists \
+          --topic bench-topic \
+          --partitions 6 \
+          --replication-factor 3
+
+        echo "Kafka cluster ready"
+
+  # -------------------------------------------------------
+  # Benchmark container
+  # -------------------------------------------------------
+  benchmark:
+    build: .
+    container_name: kafka-benchmark
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: kafka-broker1:19092,kafka-broker2:19092,kafka-broker3:19092
+    command: ["node", "src/index.js"]
+
+volumes:
+  kafka_controller_data:
+  kafka_broker1_data:
+  kafka_broker2_data:
+  kafka_broker3_data:

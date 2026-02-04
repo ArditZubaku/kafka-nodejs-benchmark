@@ -1,0 +1,13 @@
+{
+  "name": "kafka-node-benchmark",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@platformatic/kafka": "^1.5.0",
+    "kafkajs": "^2.2.4",
+    "node-rdkafka": "^3.3.1"
+  }
+}
