@@ -1,14 +1,20 @@
 import Kafka from "node-rdkafka"
-import { BROKERS, TOPIC, MESSAGE_COUNT, MESSAGE_SIZE } from "./config.js"
+import {
+  BROKERS,
+  TOPIC,
+  MESSAGE_COUNT,
+  MESSAGE_SIZE,
+  BATCH_SIZE
+} from "./config.js"
 import { payload, now, result } from "./util.js"
-
-const BATCH_SIZE = 100
 
 export async function runRdkafka() {
   const producer = new Kafka.Producer({
     "bootstrap.servers": BROKERS.join(","),
-    "linger.ms": 0,
-    "queue.buffering.max.messages": 1_000_000
+    "acks": 1,
+    "linger.ms": 5,
+    "batch.num.messages": BATCH_SIZE,
+    "queue.buffering.max.messages": 1_000_000,
   })
 
   await new Promise((res, rej) =>
@@ -26,7 +32,7 @@ export async function runRdkafka() {
   for (let i = 0; i < batches; i++) {
     for (let j = 0; j < BATCH_SIZE && produced < MESSAGE_COUNT; j++) {
       try {
-        producer.produce(TOPIC, 0, value)
+        producer.produce(TOPIC, null, value)
         produced++
       } catch (err) {
         if (err.code === Kafka.CODES.ERRORS.ERR__QUEUE_FULL) {
@@ -39,7 +45,7 @@ export async function runRdkafka() {
     }
   }
 
-  await new Promise(res => producer.flush(10000, res))
+  await new Promise(res => producer.flush(15_000, res))
   producer.disconnect()
 
   const end = now()
