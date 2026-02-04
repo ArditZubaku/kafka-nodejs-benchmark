@@ -1,46 +1,46 @@
-import {
-  Producer,
-  ProduceAcks
-} from "@platformatic/kafka"
+import { Producer, ProduceAcks } from "@platformatic/kafka";
 import {
   BROKERS,
   TOPIC,
   MESSAGE_COUNT,
   MESSAGE_SIZE,
-  BATCH_SIZE
-} from "./config.js"
-import { payload, now, result } from "./util.js"
+  BATCH_SIZE,
+} from "./config.js";
+import { payload, now, result } from "./util.js";
+import { resetMemory, sampleMemory, getPeakMemoryMB } from "./memory.js";
 
 export async function runPlatformatic() {
   const producer = new Producer({
     clientId: "benchmarks",
-    bootstrapBrokers: BROKERS
-  })
+    bootstrapBrokers: BROKERS,
+  });
 
-  const value = payload(MESSAGE_SIZE) // Buffer
-  const batches = Math.ceil(MESSAGE_COUNT / BATCH_SIZE)
+  const value = payload(MESSAGE_SIZE); // Buffer
+  const batches = Math.ceil(MESSAGE_COUNT / BATCH_SIZE);
 
-  const start = now()
+  resetMemory();
+  const start = now();
 
   for (let i = 0; i < batches; i++) {
-    const messages = []
+    const messages = [];
 
     for (let j = 0; j < BATCH_SIZE && i * BATCH_SIZE + j < MESSAGE_COUNT; j++) {
       messages.push({
         topic: TOPIC,
-        value
-      })
+        value,
+      });
     }
 
     await producer.send({
       messages,
       acks: ProduceAcks.LEADER,
-    })
+    });
+    sampleMemory();
   }
 
-  const end = now()
+  const end = now();
 
-  await producer.close()
+  await producer.close();
 
-  return result("Platformatic", MESSAGE_COUNT, start, end)
+  return result("Platformatic", MESSAGE_COUNT, start, end, getPeakMemoryMB());
 }
