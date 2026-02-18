@@ -12,10 +12,10 @@ import { resetMemory, sampleMemory, getPeakMemoryMB } from "./memory.js";
 export async function runRdkafka() {
   const producer = new Kafka.Producer({
     "bootstrap.servers": BROKERS.join(","),
-    acks: 1,
-    "linger.ms": 5,
-    "batch.num.messages": BATCH_SIZE,
-    "queue.buffering.max.messages": 1_000_000,
+    "request.required.acks": 1,
+    "linger.ms": 0,                              // no artificial delay
+    "batch.num.messages": BATCH_SIZE,            // match batch size of other clients
+    "queue.buffering.max.messages": BATCH_SIZE * 2, // just enough for one batch
   });
 
   await new Promise((res, rej) =>
@@ -29,29 +29,24 @@ export async function runRdkafka() {
 
   resetMemory();
   const start = now();
-  let produced = 0;
 
   for (let i = 0; i < batches; i++) {
-    for (let j = 0; j < BATCH_SIZE && produced < MESSAGE_COUNT; j++) {
-      try {
-        producer.produce(TOPIC, null, value);
-        sampleMemory();
-        produced++;
-      } catch (err) {
-        if (err.code === Kafka.CODES.ERRORS.ERR__QUEUE_FULL) {
-          await new Promise((r) => setTimeout(r, 1));
-          j--;
-        } else {
-          throw err;
-        }
-      }
+    const batchSize = Math.min(BATCH_SIZE, MESSAGE_COUNT - i * BATCH_SIZE);
+
+    // Enqueue the full batch synchronously, then flush — same semantic as
+    // KafkaJS/Platformatic: send batch, wait for broker ack, repeat.
+    for (let j = 0; j < batchSize; j++) {
+      producer.produce(TOPIC, null, value);
     }
+
+    await new Promise((res, rej) =>
+      producer.flush(15_000, (err) => (err ? rej(err) : res())),
+    );
+    sampleMemory();
   }
 
-  await new Promise((res) => producer.flush(15_000, res));
-  producer.disconnect();
-
   const end = now();
+  producer.disconnect();
 
   return result("node-rdkafka", MESSAGE_COUNT, start, end, getPeakMemoryMB());
 }
